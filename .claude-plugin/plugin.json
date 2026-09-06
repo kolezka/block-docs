@@ -1,0 +1,8 @@
+{
+  "name": "block-docs",
+  "version": "0.1.1",
+  "description": "Write, extend, refresh and lint block-style system documentation: one folder per building block, CONTRACTS with an enforcement field, INVARIANTS with the defect that paid for them, GAPS, OPERATIONS, and a pinned commit with evidence tags on every claim.",
+  "author": { "name": "Mariusz Rakus" },
+  "repository": "https://github.com/kolezka/block-docs",
+  "keywords": ["documentation", "architecture", "lint", "contracts", "invariants"]
+}

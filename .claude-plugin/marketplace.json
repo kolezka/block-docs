@@ -1,0 +1,14 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "block-docs",
+  "description": "Block-style system documentation: skill, writer agent and lint",
+  "owner": { "name": "Mariusz Rakus" },
+  "plugins": [
+    {
+      "name": "block-docs",
+      "description": "Write, extend, refresh and lint block-style system documentation",
+      "source": "./",
+      "category": "documentation"
+    }
+  ]
+}

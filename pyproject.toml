@@ -1,0 +1,12 @@
+[project]
+name = "block-docs"
+version = "0.1.1"
+description = "Block-style documentation tools for Claude Code"
+requires-python = ">=3.9"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8.4,<9"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
