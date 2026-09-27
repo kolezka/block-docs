@@ -1,0 +1,6 @@
+{
+  "section": "CONTRACTS.md > Premium access check",
+  "verdict": "wrong",
+  "class": "POLARITY",
+  "why": "hasPremiumAccess() returns !UNPAID_TIERS.has(account.tier) and UNPAID_TIERS contains only free, so trial and grace accounts get premium access. The page states the reverse because it trusted the comment above UNPAID_TIERS instead of the expression."
+}

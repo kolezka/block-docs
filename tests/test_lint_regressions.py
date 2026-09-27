@@ -39,7 +39,9 @@ def test_no_git_does_not_turn_planned_spec_targets_into_existing_code(tmp_path: 
     result = run_lint(fixture, "--no-git")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "E006" not in finding_codes(result), result.stdout
-    assert "1 code citation skipped for spec pin" in result.stdout
+    # 5, not 1: same colon-detail extraction change as in test_lint.py's
+    # test_e006_skips_target_citations_for_spec_pins_and_reports_limit.
+    assert "5 code citations skipped for spec pin" in result.stdout
 
 
 @pytest.mark.parametrize("value", ["src/service.py::enforce_rule()", "src/service.py::enforce_rule() (runtime)"])

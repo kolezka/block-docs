@@ -1,0 +1,6 @@
+{
+  "section": "CONTRACTS.md > Session validation",
+  "verdict": "wrong",
+  "class": "INTENT_AS_FACT",
+  "why": "requireSession() checks only that the sid cookie is present (the condition is !token) and never looks the token up or checks expiry, so any non-empty cookie value passes. The page restates the comment's intent as behavior. The rule belongs in GAPS with enforcement: convention, and the missing validation is a suspected code bug."
+}

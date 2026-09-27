@@ -1,0 +1,6 @@
+{
+  "section": "INVARIANTS.md > 1. Prices table is read-only at runtime",
+  "verdict": "wrong",
+  "class": "CROSS_BOUNDARY_ABSENCE",
+  "why": "src/billing/adjust.ts::applyPriceAdjustment() runs UPDATE prices, and src/billing/routes.ts::handleAdjustPrice() calls it, so the table is written at runtime from outside the catalog block. The scope line searched only src/catalog/, the block's own paths."
+}

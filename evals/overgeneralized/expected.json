@@ -1,0 +1,6 @@
+{
+  "section": "INVARIANTS.md > 1. Producers are idempotent",
+  "verdict": "wrong",
+  "class": "OVERGENERALIZED",
+  "why": "git grep over src/ finds three enqueue() producers. Only request_invoice() passes dedupe_key; send_welcome_email() and schedule_report() pass none, so their retries add duplicate jobs. The scope line checked only the invoice producer."
+}

@@ -25,7 +25,17 @@ ENFORCEMENT_RE = re.compile(r"^[ \t]*enforcement:[ \t]*(\S.*)$")
 INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
 EVIDENCE_RE = re.compile(
     r"\[(?:verified|inferred|assumption)\]"
-    r"|\[(?:historical|design):[ \t]*[^\]\n]+\]"
+    r"|\[(?:verified|inferred|assumption|historical|design):[ \t]*[^\]\n]+\]"
+)
+VERIFIED_TAG_RE = re.compile(r"\[verified(?::[ \t]*[^\]\n]+)?\]")
+EVIDENCE_COLON_DETAIL_OPEN_RE = re.compile(r"\[(?:verified|inferred|assumption):[ \t]*")
+SCOPE_LINE_RE = re.compile(r"^[ \t]*scope:[ \t]*(\S.*)$")
+SCOPE_PLACEHOLDER_VALUES = ("none", "n/a")
+REVERT_SUBJECT_RE = re.compile(r"revert\b", re.IGNORECASE)
+LIST_ITEM_RE = re.compile(r"^(?:[-*+]|\d+[.)])[ \t]+\S")
+ABSOLUTE_WORD_RE = re.compile(
+    r"\b(?:every|only|never|always|all|none|cannot|read-only|no[ \t]+other)\b",
+    re.IGNORECASE,
 )
 
 
@@ -98,6 +108,7 @@ class LintResult:
     findings: List[Finding]
     scanned_files: int
     skipped_spec_citations: int
+    notes: List[str] = field(default_factory=list)
 
     @property
     def errors(self) -> int:
@@ -124,6 +135,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-git",
         action="store_true",
         help="skip ancestry checks and inspect files from --repo",
+    )
+    parser.add_argument(
+        "--drift",
+        metavar="REF",
+        help="warn about citation and ownership drift between each page's pin and REF",
     )
     return parser
 
@@ -563,32 +579,142 @@ def _check_ownership(pages: Sequence[Page]) -> List[Finding]:
     return findings
 
 
+def _parse_citation_value(raw_value: str) -> Optional[Tuple[str, str]]:
+    value = raw_value.strip()
+    wrapped_enforcement = value.startswith("enforcement:")
+    if wrapped_enforcement:
+        value = value.partition(":")[2].strip()
+        if value.startswith("planned:"):
+            value = value.partition(":")[2].strip()
+    if "::" not in value:
+        return None
+    path, symbol = (part.strip() for part in value.split("::", 1))
+    if wrapped_enforcement:
+        symbol = re.sub(r"\s+\([^)]*\)$", "", symbol)
+    if not path or not symbol or "/" not in path and "." not in path:
+        return None
+    if len(symbol) >= 2 and symbol[0] == symbol[-1] and symbol[0] in "\"'":
+        symbol = symbol[1:-1]
+    elif symbol.endswith("()"):
+        symbol = symbol[:-2]
+    if not symbol:
+        return None
+    return path, symbol
+
+
+def _opens_quoted_symbol(text: str, index: int) -> bool:
+    """True when the quote character at `index` immediately follows a `::`
+    separator (spaces allowed in between), i.e. it opens a cited symbol's
+    quoted form (`path::"symbol"`) rather than an apostrophe in
+    surrounding prose (`the writer's note`).
+    """
+    cursor = index
+    while cursor > 0 and text[cursor - 1] in " \t":
+        cursor -= 1
+    return text[cursor - 2 : cursor] == "::"
+
+
+def _colon_detail_span_quoted(line: str, start: int) -> Optional[str]:
+    quote: Optional[str] = None
+    for index in range(start, len(line)):
+        char = line[index]
+        if quote is not None:
+            if char == quote:
+                quote = None
+            continue
+        if char in "\"'" and _opens_quoted_symbol(line, index):
+            quote = char
+            continue
+        if char == "]":
+            return line[start:index]
+    return None
+
+
+def _colon_detail_span(line: str, start: int) -> Optional[str]:
+    """Return the text of a `[verified: ...]`-style detail starting at
+    `start`, treating a `]` inside a quoted symbol as part of the detail
+    rather than its terminator (a cited code snippet can itself contain
+    `]`, e.g. `rows[0]`, or a `;`, e.g. `end();`). A quote is only honored
+    right after a `::` separator, so an apostrophe in ordinary prose (`the
+    writer's note`) cannot swallow the rest of the line. If that stricter
+    scan still finds no terminator, fall back to the first `]` on the
+    line so the detail is never silently dropped.
+    """
+    span = _colon_detail_span_quoted(line, start)
+    if span is not None:
+        return span
+    end = line.find("]", start)
+    if end == -1:
+        return None
+    return line[start:end]
+
+
+def _split_unquoted(text: str, separator: str) -> List[str]:
+    """Split `text` on `separator`, ignoring occurrences inside a quoted
+    symbol that opens right after a `::` separator.
+    """
+    pieces: List[str] = []
+    current: List[str] = []
+    quote: Optional[str] = None
+    for index, char in enumerate(text):
+        if quote is not None:
+            current.append(char)
+            if char == quote:
+                quote = None
+            continue
+        if char in "\"'" and _opens_quoted_symbol(text, index):
+            quote = char
+            current.append(char)
+            continue
+        if char == separator:
+            pieces.append("".join(current))
+            current = []
+            continue
+        current.append(char)
+    pieces.append("".join(current))
+    return pieces
+
+
+def _has_backtick(piece: str) -> bool:
+    return "`" in piece
+
+
+def _colon_detail_citations(line: str) -> List[Tuple[str, str]]:
+    """Parse every `[verified|inferred|assumption: ...]` colon-detail
+    citation on `line`, skipping any piece that contains a backtick
+    (its citation is already captured by the inline-code pass over the
+    same line, and parsing it again here would both double-count it and
+    corrupt its path with the leading backtick).
+    """
+    found: List[Tuple[str, str]] = []
+    for open_match in EVIDENCE_COLON_DETAIL_OPEN_RE.finditer(line):
+        detail = _colon_detail_span(line, open_match.end())
+        if detail is None:
+            continue
+        for piece in _split_unquoted(detail, ";"):
+            if _has_backtick(piece):
+                continue
+            parsed = _parse_citation_value(piece)
+            if parsed is not None:
+                found.append(parsed)
+    return found
+
+
 def _extract_citations(page: Page) -> List[Citation]:
     prose = _strip_fenced_code(page.body)
     citations: List[Citation] = []
     for offset, line in enumerate(prose.splitlines()):
         for inline_match in INLINE_CODE_RE.finditer(line):
-            value = inline_match.group(1).strip()
-            wrapped_enforcement = value.startswith("enforcement:")
-            if wrapped_enforcement:
-                value = value.partition(":")[2].strip()
-                if value.startswith("planned:"):
-                    value = value.partition(":")[2].strip()
-            if "::" not in value:
-                continue
-            path, symbol = (part.strip() for part in value.split("::", 1))
-            if wrapped_enforcement:
-                symbol = re.sub(r"\s+\([^)]*\)$", "", symbol)
-            if not path or not symbol or "/" not in path and "." not in path:
-                continue
-            if len(symbol) >= 2 and symbol[0] == symbol[-1] and symbol[0] in "\"'":
-                symbol = symbol[1:-1]
-            elif symbol.endswith("()"):
-                symbol = symbol[:-2]
-            if symbol:
+            parsed = _parse_citation_value(inline_match.group(1))
+            if parsed is not None:
+                path, symbol = parsed
                 citations.append(
                     Citation(path=path, symbol=symbol, line=page.body_start_line + offset)
                 )
+        for path, symbol in _colon_detail_citations(line):
+            citations.append(
+                Citation(path=path, symbol=symbol, line=page.body_start_line + offset)
+            )
     return citations
 
 
@@ -764,6 +890,72 @@ def _contract_entries(prose: str) -> List[Tuple[int, int, int]]:
     return entries
 
 
+def _absolute_claim_regions(prose: str) -> List[Tuple[int, int]]:
+    """Return every (start, end) line range W004 must scan: each leaf
+    `_contract_entries` section, plus the regions that have no leaf
+    heading of its own and so falls outside `_contract_entries`: the text
+    before the first heading, intro text under a level-1 title, and a parent `##` group's intro text before
+    its first `###` child.
+    """
+    lines = prose.splitlines()
+    headings: List[Tuple[int, int]] = []
+    for index, line in enumerate(lines):
+        match = HEADING_RE.match(line)
+        if match:
+            headings.append((index, len(match.group(1))))
+
+    regions: List[Tuple[int, int]] = [
+        (heading_line + 1, end_line) for heading_line, end_line, _level in _contract_entries(prose)
+    ]
+
+    if headings and headings[0][0] > 0:
+        regions.append((0, headings[0][0]))
+
+    # Intro text under a page title, up to the next heading or page end.
+    for heading_index, (line_index, level) in enumerate(headings):
+        if level != 1:
+            continue
+        if heading_index + 1 < len(headings):
+            end_line = headings[heading_index + 1][0]
+        else:
+            end_line = len(lines)
+        if end_line > line_index + 1:
+            regions.append((line_index + 1, end_line))
+
+    for heading_index, (line_index, level) in enumerate(headings):
+        if level != 2:
+            continue
+        first_child_line: Optional[int] = None
+        for next_line, next_level in headings[heading_index + 1 :]:
+            if next_level <= level:
+                break
+            if next_level == 3 and first_child_line is None:
+                first_child_line = next_line
+        if first_child_line is not None and first_child_line > line_index + 1:
+            regions.append((line_index + 1, first_child_line))
+
+    return regions
+
+
+def _scope_value_is_meaningful(value: str) -> bool:
+    """A `scope:` value counts only when it names a command or a path
+    set (it contains a backtick or a `/`); a bare placeholder like `none`
+    or `n/a` does not, even though `n/a` itself contains a `/`.
+    """
+    normalized = value.strip().lower()
+    if normalized in SCOPE_PLACEHOLDER_VALUES:
+        return False
+    return "`" in value or "/" in value
+
+
+def _section_has_scope_line(lines: Sequence[str]) -> bool:
+    for line in lines:
+        match = SCOPE_LINE_RE.match(line)
+        if match and _scope_value_is_meaningful(match.group(1)):
+            return True
+    return False
+
+
 def _check_contract_enforcement(page: Page) -> List[Finding]:
     if page.path.name != "CONTRACTS.md":
         return []
@@ -783,6 +975,159 @@ def _check_contract_enforcement(page: Page) -> List[Finding]:
                     "contract entry has no nonempty enforcement: value",
                 )
             )
+    return findings
+
+
+def _strip_inline_code(text: str) -> str:
+    return INLINE_CODE_RE.sub(" ", text)
+
+
+def _strip_claim_noise(line: str) -> str:
+    """Remove a colon-tag citation detail (`[verified|inferred|assumption:
+    ...]`) and blank out a whole `enforcement:` line, before scanning
+    prose for absolute words. A citation's own path/symbol text, or an
+    enforcement value such as `(every route)`, is not a claim and must
+    not trigger W004.
+    """
+    if ENFORCEMENT_RE.match(line.strip().strip("`").strip()):
+        return ""
+    pieces: List[str] = []
+    cursor = 0
+    for open_match in EVIDENCE_COLON_DETAIL_OPEN_RE.finditer(line):
+        if open_match.start() < cursor:
+            continue
+        detail = _colon_detail_span(line, open_match.end())
+        pieces.append(line[cursor : open_match.start()])
+        if detail is None:
+            cursor = open_match.end()
+            continue
+        cursor = open_match.end() + len(detail) + 1  # past the closing ]
+    pieces.append(line[cursor:])
+    return "".join(pieces)
+
+
+def _paragraph_blocks(lines: Sequence[str]) -> List[Tuple[int, int]]:
+    """Split lines into blank-line-delimited paragraphs, with each markdown
+    list item split out as its own block that also absorbs its indented
+    continuation lines. A heading line is always a hard block boundary,
+    even with no blank line before or after it.
+    """
+    blocks: List[Tuple[int, int]] = []
+    start: Optional[int] = None
+    in_list_item = False
+
+    def close(end: int) -> None:
+        nonlocal start, in_list_item
+        if start is not None:
+            blocks.append((start, end))
+            start = None
+        in_list_item = False
+
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or HEADING_RE.match(line):
+            close(index)
+            continue
+        if LIST_ITEM_RE.match(stripped):
+            close(index)
+            start = index
+            in_list_item = True
+            continue
+        if in_list_item and line[:1] in (" ", "\t"):
+            continue  # indented continuation line: absorb into the list block
+        if in_list_item:
+            close(index)
+        if start is None:
+            start = index
+    close(len(lines))
+    return blocks
+
+
+def _is_spec_mode(page: Page) -> bool:
+    pin = page.pin
+    return isinstance(pin, str) and pin.startswith("spec@")
+
+
+def _check_unscoped_absolute_claims(page: Page) -> List[Finding]:
+    if page.path.name not in ("CONTRACTS.md", "INVARIANTS.md"):
+        return []
+    if _is_spec_mode(page):
+        return []
+    prose = _strip_fenced_code(page.body)
+    lines = prose.splitlines()
+    findings: List[Finding] = []
+    for start_line, end_line in _absolute_claim_regions(prose):
+        section_lines = lines[start_line:end_line]
+        if _section_has_scope_line(section_lines):
+            continue
+        offending_line: Optional[int] = None
+        for block_start, block_end in _paragraph_blocks(section_lines):
+            block_lines = section_lines[block_start:block_end]
+            if not VERIFIED_TAG_RE.search("\n".join(block_lines)):
+                continue
+            for offset, line in enumerate(block_lines):
+                scanned = _strip_claim_noise(_strip_inline_code(line))
+                if ABSOLUTE_WORD_RE.search(scanned):
+                    offending_line = start_line + block_start + offset
+                    break
+            if offending_line is not None:
+                break
+        if offending_line is not None:
+            findings.append(
+                Finding(
+                    page.display_path,
+                    page.body_start_line + offending_line,
+                    "W004",
+                    "absolute claim has no scope line in this section",
+                )
+            )
+    return findings
+
+
+def _check_verified_citation(page: Page) -> List[Finding]:
+    if page.is_root or page.path.name == "README.md":
+        return []
+    if _is_spec_mode(page):
+        return []
+    prose = _strip_fenced_code(page.body)
+    lines = prose.splitlines()
+    scoped_ranges = [
+        (heading_line + 1, end_line)
+        for heading_line, end_line, _level in _contract_entries(prose)
+        if _section_has_scope_line(lines[heading_line + 1 : end_line])
+    ]
+    findings: List[Finding] = []
+    for block_start, block_end in _paragraph_blocks(lines):
+        if any(
+            start <= block_start and block_end <= end for start, end in scoped_ranges
+        ):
+            continue
+        block_lines = lines[block_start:block_end]
+        block_text = "\n".join(block_lines)
+        if not VERIFIED_TAG_RE.search(block_text):
+            continue
+        has_citation = any(
+            _parse_citation_value(match.group(1)) is not None
+            for line in block_lines
+            for match in INLINE_CODE_RE.finditer(line)
+        )
+        if not has_citation:
+            has_citation = any(_colon_detail_citations(line) for line in block_lines)
+        if has_citation:
+            continue
+        offending_line = block_start
+        for offset, line in enumerate(block_lines):
+            if VERIFIED_TAG_RE.search(line):
+                offending_line = block_start + offset
+                break
+        findings.append(
+            Finding(
+                page.display_path,
+                page.body_start_line + offending_line,
+                "W005",
+                "verified claim has no recognized citation",
+            )
+        )
     return findings
 
 
@@ -836,7 +1181,143 @@ def _check_prose(page: Page) -> List[Finding]:
     return findings
 
 
-def lint(docs_dir: Path, repo: Path, exemptions: Set[Tuple[str, ...]], no_git: bool) -> LintResult:
+def _resolvable_pin_state(page: Page, pin_states: Mapping[str, PinState]) -> Optional[PinState]:
+    pin = page.pin
+    if not page.pin_valid or pin is None or pin.startswith("spec@"):
+        return None
+    state = pin_states.get(pin)
+    if state is None or not state.available or not state.ancestor or state.oid is None:
+        return None
+    return state
+
+
+def _check_drift_citations(pages: Sequence[Page], repo: Path, drift: str, pin_states: Mapping[str, PinState]) -> List[Finding]:
+    findings: List[Finding] = []
+    for page in pages:
+        state = _resolvable_pin_state(page, pin_states)
+        if state is None:
+            continue
+        drifted_paths: List[str] = []
+        seen_paths: Set[str] = set()
+        for citation in _extract_citations(page):
+            if citation.path in seen_paths or not _valid_git_relative_path(citation.path):
+                continue
+            seen_paths.add(citation.path)
+            diff = _git(repo, "diff", "--quiet", state.oid, drift, "--", citation.path)
+            if diff.returncode == 1:
+                drifted_paths.append(citation.path)
+        for path in sorted(drifted_paths):
+            findings.append(
+                Finding(
+                    page.display_path,
+                    page.body_start_line,
+                    "W006",
+                    "cited file {!r} differs between pin {!r} and {!r}".format(path, page.pin, drift),
+                )
+            )
+    return findings
+
+
+def _check_drift_reverts(pages: Sequence[Page], repo: Path, drift: str, pin_states: Mapping[str, PinState]) -> List[Finding]:
+    findings: List[Finding] = []
+    for page in pages:
+        if page.is_root or page.path.name != "README.md" or page.metadata is None:
+            continue
+        state = _resolvable_pin_state(page, pin_states)
+        if state is None:
+            continue
+        owns = page.metadata.get("owns")
+        if not isinstance(owns, list):
+            continue
+        owned_paths = [parsed for parsed in (_owned_path(raw) for raw in owns) if parsed is not None]
+        if not owned_paths:
+            continue
+        log = _git(repo, "log", "--format=%H%x09%s", "{}..{}".format(state.oid, drift))
+        if log.returncode != 0:
+            continue
+        for line in log.stdout.decode("utf-8", "replace").splitlines():
+            sha, _, subject = line.partition("\t")
+            if not sha or not REVERT_SUBJECT_RE.match(subject):
+                continue
+            # -m --first-parent so a merge revert's touched paths are enumerated
+            # too (plain `show --name-only` reports none for a merge commit);
+            # quotePath=false so a non-ASCII path isn't C-style escaped and can
+            # still match against `owns:`.
+            show = _git(
+                repo,
+                "-c",
+                "core.quotePath=false",
+                "diff-tree",
+                "--no-commit-id",
+                "--name-only",
+                "-r",
+                "-m",
+                "--first-parent",
+                sha,
+            )
+            if show.returncode != 0:
+                continue
+            touched_paths = [
+                parsed
+                for raw_path in show.stdout.decode("utf-8", "replace").splitlines()
+                if raw_path.strip()
+                for parsed in (_owned_path(raw_path),)
+                if parsed is not None
+            ]
+            if any(
+                _ownership_overlaps(touched_path, owned_path)
+                for touched_path in touched_paths
+                for owned_path in owned_paths
+            ):
+                findings.append(
+                    Finding(
+                        page.display_path,
+                        page.field_lines.get("owns", 1),
+                        "W007",
+                        "revert commit {} ({!r}) touches an owned path between pin {!r} and {!r}".format(
+                            sha[:12], subject, page.pin, drift
+                        ),
+                    )
+                )
+    return findings
+
+
+def _pin_ancestor_of_drift(repo: Path, oid: str, drift: str) -> bool:
+    return _git(repo, "merge-base", "--is-ancestor", oid, drift).returncode == 0
+
+
+def _check_drift(
+    pages: Sequence[Page],
+    repo: Path,
+    drift: str,
+    pin_states: Mapping[str, PinState],
+) -> Tuple[List[Finding], List[str]]:
+    eligible_pages: List[Page] = []
+    notes: List[str] = []
+    for page in pages:
+        state = _resolvable_pin_state(page, pin_states)
+        if state is None:
+            continue
+        if _pin_ancestor_of_drift(repo, state.oid, drift):
+            eligible_pages.append(page)
+        else:
+            notes.append(
+                "{}: {!r} is not a descendant of pin {!r}; drift checks skipped".format(
+                    page.display_path, drift, page.pin
+                )
+            )
+    findings = _check_drift_citations(eligible_pages, repo, drift, pin_states)
+    findings.extend(_check_drift_reverts(eligible_pages, repo, drift, pin_states))
+    return findings, notes
+
+
+def lint(
+    docs_dir: Path,
+    repo: Path,
+    exemptions: Set[Tuple[str, ...]],
+    no_git: bool,
+    drift: Optional[str] = None,
+) -> LintResult:
     pages: List[Page] = []
     findings: List[Finding] = []
     for path in sorted(docs_dir.rglob("*.md")):
@@ -864,6 +1345,8 @@ def lint(docs_dir: Path, repo: Path, exemptions: Set[Tuple[str, ...]], no_git: b
         findings.extend(_check_identity(page))
         findings.extend(_check_contract_enforcement(page))
         findings.extend(_check_prose(page))
+        findings.extend(_check_unscoped_absolute_claims(page))
+        findings.extend(_check_verified_citation(page))
 
     if not pages:
         findings.append(
@@ -880,11 +1363,16 @@ def lint(docs_dir: Path, repo: Path, exemptions: Set[Tuple[str, ...]], no_git: b
     )
     findings.extend(citation_findings)
     findings.extend(_check_pins_consistent(pages, pin_states))
+    notes: List[str] = []
+    if drift:
+        drift_findings, notes = _check_drift(pages, repo, drift, pin_states)
+        findings.extend(drift_findings)
     findings.sort(key=lambda finding: (finding.path, finding.line, finding.code, finding.message))
     return LintResult(
         findings=findings,
         scanned_files=len(pages),
         skipped_spec_citations=skipped_spec_citations,
+        notes=sorted(notes),
     )
 
 
@@ -895,6 +1383,8 @@ def _plural(count: int, singular: str, plural: str) -> str:
 def _print_result(result: LintResult) -> None:
     for finding in result.findings:
         print("{}:{}: {} {}".format(finding.path, finding.line, finding.code, finding.message))
+    for note in result.notes:
+        print("Note: {}".format(note))
     if result.skipped_spec_citations:
         print(
             "Limitations: {} {} skipped for spec pin; planned targets were not checked".format(
@@ -922,7 +1412,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not _is_within(docs_dir, repo):
         parser.error("docs-dir must resolve inside --repo")
     exemptions = _parse_exemptions(parser, args.exempt)
-    result = lint(docs_dir, repo, exemptions, args.no_git)
+    if args.drift:
+        if args.no_git:
+            parser.error("--drift cannot be combined with --no-git")
+        if _git(repo, "rev-parse", "--verify", "{}^{{commit}}".format(args.drift)).returncode != 0:
+            parser.error("--drift ref {!r} does not resolve to a commit in --repo".format(args.drift))
+    result = lint(docs_dir, repo, exemptions, args.no_git, args.drift)
     _print_result(result)
     if result.errors or args.strict and result.warnings:
         return 1
