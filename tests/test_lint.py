@@ -103,12 +103,15 @@ def write_block(
             body = (
                 "# Contracts\n\n"
                 "## Enforced rule\n\n"
-                "The service keeps the rule. [verified]\n\n"
+                "The service keeps the rule. [verified: src/service.py::enforce_rule()]\n\n"
                 "enforcement: `src/service.py::enforce_rule()`"
             )
             text = page_text(block=declared_block, doc=doc, pin=pin, body=body)
         else:
-            body = f"# {doc.title()}\n\nThe {doc.lower()} record. [verified]"
+            body = (
+                f"# {doc.title()}\n\n"
+                f"The {doc.lower()} record. [verified: src/service.py::enforce_rule()]"
+            )
             text = page_text(block=declared_block, doc=doc, pin=pin, body=body)
         (block_dir / f"{doc}.md").write_text(text, encoding="utf-8")
     return block_dir
@@ -459,7 +462,12 @@ def test_e006_skips_target_citations_for_spec_pins_and_reports_limit(
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "E006" not in finding_codes(result)
-    assert "1 code citation skipped for spec pin" in result.stdout
+    # 5, not 1: _extract_citations also reads colon-detail citations now, so
+    # every mandatory doc's colon-tagged citation to src/service.py::enforce_rule()
+    # counts (CONTRACTS has two: the prose colon-tag and the backtick enforcement
+    # field, both retargeted by the replace() above; INVARIANTS, GAPS and
+    # OPERATIONS each add one colon-tag citation of their own).
+    assert "5 code citations skipped for spec pin" in result.stdout
 
 
 def test_e006_accepts_quoted_phrase_at_pin(tmp_path: Path) -> None:
@@ -685,7 +693,10 @@ def test_w003_does_not_accept_unknown_evidence_tag(tmp_path: Path) -> None:
     fixture = make_good_repo(tmp_path)
     operations = fixture.docs / "alpha" / "OPERATIONS.md"
     text = operations.read_text(encoding="utf-8")
-    operations.write_text(text.replace("[verified]", "[guessed]"), encoding="utf-8")
+    operations.write_text(
+        text.replace("[verified: src/service.py::enforce_rule()]", "[guessed]"),
+        encoding="utf-8",
+    )
     (fixture.docs / "OWNERSHIP.md").write_text(
         page_text(
             block="_root",

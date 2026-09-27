@@ -1,0 +1,6 @@
+{
+  "section": "INVARIANTS.md > 1. Hidden items never appear in results",
+  "verdict": "wrong",
+  "class": "UNREACHABLE",
+  "why": "excludeHidden() is called only from buildVisibleResults(), and nothing calls buildVisibleResults(). The live path handleSearch() -> search() -> rankResults() never filters on hidden, so hidden items are returned. The scope line looked only at filters.ts. This is also a suspected code bug."
+}
