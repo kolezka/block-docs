@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "block-docs",
+    "description": "Write, extend, refresh and lint block-style system documentation: one folder per building block, CONTRACTS with an enforcement field, INVARIANTS with the defect that paid for them, GAPS, OPERATIONS, and a pinned commit with evidence tags on every claim."
+  }
+}
