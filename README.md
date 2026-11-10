@@ -51,6 +51,33 @@ writer and verifier inherit the session's model unless the coordinator picks ano
 newer and has no third-party runtime dependencies. Revision validation also needs
 Git and the referenced commits in the local repository.
 
+### DeepSeek Harness
+
+Install the local adapter into a DSH profile (Node 20 or newer is required):
+
+```sh
+dsh plugin --profile web add file:/absolute/path/to/block-docs/dsh
+```
+
+The skill is available as `block-docs`. The writer and verifier are exposed as role
+brief skills, not native agent types; choose the model when delegating them.
+
+The vendored runtime comes from `kolezka/claude-plugins-dsh` commit
+`a721298862b4dd3244ce3b48a184f95c512dc700`. To refresh or check it, build that
+revision of the runtime and use its CLI, rather than assuming the published package
+contains the same revision:
+
+```sh
+git clone https://github.com/kolezka/claude-plugins-dsh.git
+cd claude-plugins-dsh
+git checkout a721298862b4dd3244ce3b48a184f95c512dc700
+pnpm install --frozen-lockfile
+pnpm run build
+node dist/bin/cli.js sync /absolute/path/to/block-docs
+node dist/bin/cli.js sync --check /absolute/path/to/block-docs
+node dist/bin/cli.js inspect /absolute/path/to/block-docs
+```
+
 ## Use
 
 Create documentation from code:
@@ -251,6 +278,7 @@ Run the test suite from this checkout:
 
 ```sh
 env -u FORCE_COLOR uv run pytest -q
+node --test tests/dsh-adapter.test.mjs
 ```
 
 Validate both manifests with the installed Claude Code CLI:
