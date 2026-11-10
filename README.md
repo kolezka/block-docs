@@ -46,6 +46,30 @@ git clone https://github.com/kolezka/block-docs.git
 claude --plugin-dir ./block-docs
 ```
 
+### DeepSeek Harness
+
+Install the adapter's published runtime before adding the plugin or using a file overlay:
+
+```sh
+git clone https://github.com/kolezka/block-docs.git
+cd block-docs/dsh
+bun install --frozen-lockfile
+cd ..
+dsh plugin add ./dsh
+```
+
+For a file overlay, install in `block-docs/dsh` first and point the overlay at that
+directory. The adapter imports `claude-plugin-dsh` directly; after changing its
+pinned version, run `bun install` in `dsh/` and commit the updated lockfile. To
+inspect the adapter after installation, run:
+
+```sh
+bun x claude-plugin-dsh@0.1.0 inspect .
+```
+
+Do not use the runtime's sync or scaffold commands on this adapter; version 0.1.0
+creates a vendored runtime copy. Those commands are not part of this workflow.
+
 The plugin ships no hooks, MCP servers, credentials, or permission overrides. The
 writer and verifier inherit the session's model unless the coordinator picks another. Structural linting requires Python 3.9 or
 newer and has no third-party runtime dependencies. Revision validation also needs

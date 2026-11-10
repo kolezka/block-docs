@@ -3,3 +3,4 @@ __pycache__/
 .DS_Store
 .venv/
 .claude/worktrees/
+dsh/node_modules/
