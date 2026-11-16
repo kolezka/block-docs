@@ -117,6 +117,25 @@ def write_block(
     return block_dir
 
 
+POINTER_TEMPLATE = (
+    Path(__file__).resolve().parents[1]
+    / "skills"
+    / "block-docs"
+    / "references"
+    / "templates"
+    / "agent-pointer.md"
+)
+
+
+def write_agent_pointer(repo: Path, filename: str, docs_root: str) -> Path:
+    """Install the shipped pointer template the way the skill tells a writer to."""
+    text = POINTER_TEMPLATE.read_text(encoding="utf-8").replace("<docs-root>", docs_root)
+    path = repo / filename
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("# Project notes\n\n" + text, encoding="utf-8")
+    return path
+
+
 def make_good_repo(tmp_path: Path) -> FixtureRepo:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -134,6 +153,7 @@ def make_good_repo(tmp_path: Path) -> FixtureRepo:
     pin = commit_all(repo, "add source")
     docs = repo / "docs"
     write_block(docs, "alpha", pin, owns=["src/service.py"])
+    write_agent_pointer(repo, "AGENTS.md", "docs")
     commit_all(repo, "add docs")
     return FixtureRepo(root=repo, docs=docs, pin=pin)
 
@@ -756,3 +776,69 @@ def test_cli_returns_usage_error_for_docs_path_outside_repo(tmp_path: Path) -> N
     assert result.returncode == 2
     assert result.stdout == ""
     assert "docs-dir must resolve inside --repo" in result.stderr
+
+
+def test_w008_warns_when_no_agent_file_points_at_the_tree(tmp_path: Path) -> None:
+    fixture = make_good_repo(tmp_path)
+    (fixture.root / "AGENTS.md").unlink()
+
+    result = run_lint(fixture)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert finding_codes(result) == ["W008"], result.stdout
+    assert "agents will not know to read this tree" in result.stdout
+    assert run_lint(fixture, "--strict").returncode == 1
+
+
+def test_w008_ignores_agent_file_without_markers(tmp_path: Path) -> None:
+    fixture = make_good_repo(tmp_path)
+    (fixture.root / "AGENTS.md").write_text("# Notes\n\nSee docs/README.md.\n", encoding="utf-8")
+
+    result = run_lint(fixture)
+
+    assert finding_codes(result) == ["W008"], result.stdout
+    assert "agents will not know to read this tree" in result.stdout
+
+
+@pytest.mark.parametrize("filename", ["CLAUDE.md", ".claude/CLAUDE.md"])
+def test_w008_accepts_pointer_in_claude_files(tmp_path: Path, filename: str) -> None:
+    fixture = make_good_repo(tmp_path)
+    (fixture.root / "AGENTS.md").unlink()
+    write_agent_pointer(fixture.root, filename, "docs")
+
+    result = run_lint(fixture, "--strict")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert finding_codes(result) == []
+
+
+def test_w008_rejects_pointer_naming_another_docs_root(tmp_path: Path) -> None:
+    fixture = make_good_repo(tmp_path)
+    write_agent_pointer(fixture.root, "AGENTS.md", "documentation")
+
+    result = run_lint(fixture)
+
+    assert finding_codes(result) == ["W008"], result.stdout
+    assert "does not link `docs/README.md`" in result.stdout
+
+
+def test_w008_rejects_unterminated_pointer(tmp_path: Path) -> None:
+    fixture = make_good_repo(tmp_path)
+    path = fixture.root / "AGENTS.md"
+    text = path.read_text(encoding="utf-8").replace("<!-- block-docs:end -->", "")
+    path.write_text(text + "\n<!-- block-docs:start -->\n", encoding="utf-8")
+
+    result = run_lint(fixture)
+
+    assert finding_codes(result) == ["W008"], result.stdout
+    assert "markers must appear once each" in result.stdout
+
+
+def test_w008_one_valid_file_does_not_hide_a_broken_one(tmp_path: Path) -> None:
+    fixture = make_good_repo(tmp_path)
+    write_agent_pointer(fixture.root, "CLAUDE.md", "elsewhere")
+
+    result = run_lint(fixture)
+
+    assert finding_codes(result) == ["W008"], result.stdout
+    assert "CLAUDE.md:" in result.stdout

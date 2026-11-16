@@ -17,6 +17,9 @@ DEFAULT_EXEMPTIONS = ("reference", "superpowers", "comparisons", "plans", "specs
 MANDATORY_DOCS = ("README", "CONTRACTS", "INVARIANTS", "GAPS", "OPERATIONS")
 REQUIRED_FIELDS = ("block", "doc", "verified_against", "verified_on")
 LIST_FIELDS = ("owns", "depends_on")
+AGENT_POINTER_FILES = ("AGENTS.md", "CLAUDE.md", ".claude/CLAUDE.md")
+AGENT_POINTER_START = "<!-- block-docs:start -->"
+AGENT_POINTER_END = "<!-- block-docs:end -->"
 PIN_RE = re.compile(r"^(?:spec@)?[0-9a-fA-F]{7,40}$")
 DOC_RE = re.compile(r"^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*$")
 FIELD_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*):(?:[ \t]*(.*))?$")
@@ -1311,6 +1314,63 @@ def _check_drift(
     return findings, notes
 
 
+def _check_agent_pointer(docs_dir: Path, repo: Path) -> List[Finding]:
+    """Agents only use the tree if an instruction file they load points at it."""
+    docs_rel = docs_dir.relative_to(repo).as_posix()
+    expected_link = "README.md" if docs_rel == "." else "{}/README.md".format(docs_rel)
+    findings: List[Finding] = []
+    found_valid = False
+    for name in AGENT_POINTER_FILES:
+        path = repo / name
+        if not path.exists() and not path.is_symlink():
+            continue
+        display = _display_path(path, repo)
+        text, read_error = _safe_markdown_text(path, repo)
+        if read_error:
+            findings.append(Finding(display, 1, "W008", read_error))
+            continue
+        assert text is not None
+        lines = text.splitlines()
+        starts = [index for index, line in enumerate(lines) if line.strip() == AGENT_POINTER_START]
+        ends = [index for index, line in enumerate(lines) if line.strip() == AGENT_POINTER_END]
+        if not starts and not ends:
+            continue
+        if len(starts) != 1 or len(ends) != 1 or ends[0] < starts[0]:
+            findings.append(
+                Finding(
+                    display,
+                    (starts or ends)[0] + 1,
+                    "W008",
+                    "block-docs agent pointer markers must appear once each, start before end",
+                )
+            )
+            continue
+        section = "\n".join(lines[starts[0] + 1 : ends[0]])
+        if "`{}`".format(expected_link) not in section:
+            findings.append(
+                Finding(
+                    display,
+                    starts[0] + 1,
+                    "W008",
+                    "block-docs agent pointer does not link `{}`".format(expected_link),
+                )
+            )
+            continue
+        found_valid = True
+    if not found_valid and not findings:
+        findings.append(
+            Finding(
+                _display_path(docs_dir, repo),
+                1,
+                "W008",
+                "no {} in --repo carries the block-docs agent pointer; agents will not know to read this tree".format(
+                    " or ".join(AGENT_POINTER_FILES)
+                ),
+            )
+        )
+    return findings
+
+
 def lint(
     docs_dir: Path,
     repo: Path,
@@ -1363,6 +1423,7 @@ def lint(
     )
     findings.extend(citation_findings)
     findings.extend(_check_pins_consistent(pages, pin_states))
+    findings.extend(_check_agent_pointer(docs_dir, repo))
     notes: List[str] = []
     if drift:
         drift_findings, notes = _check_drift(pages, repo, drift, pin_states)

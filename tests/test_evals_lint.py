@@ -12,7 +12,7 @@ from typing import List
 
 import pytest
 
-from test_lint import FixtureRepo, commit_all, finding_codes, git, run_lint
+from test_lint import FixtureRepo, commit_all, finding_codes, git, run_lint, write_agent_pointer
 
 
 EVALS_ROOT = Path(__file__).resolve().parents[1] / "evals"
@@ -30,6 +30,9 @@ def _eval_repo_dirs() -> List[Path]:
 def test_eval_scenario_is_strict_clean(tmp_path: Path, repo_dir: Path) -> None:
     work = tmp_path / "repo"
     shutil.copytree(repo_dir, work)
+    # Fixtures model a docs tree for the verifier, not a whole host repo, so the
+    # agent pointer (W008) is added to the copy instead of to evals/.
+    write_agent_pointer(work, "AGENTS.md", "docs")
 
     git(work, "init", "-q", "-b", "main")
     git(work, "config", "user.name", "Block Docs Evals")

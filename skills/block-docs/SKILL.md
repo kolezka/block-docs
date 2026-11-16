@@ -76,6 +76,15 @@ For a block with many sections, dispatch the verifier once per page instead of o
 
 Read `references/conventions.md` for the full rules and their reasons.
 
+## Point agents at the tree
+
+A tree that no agent is told about does not get read. Every workflow that writes pages ends by making sure the source repository's agent instruction file carries the managed pointer block:
+
+1. Pick the file: `AGENTS.md` at `source-root` if it exists, else `CLAUDE.md`, else `.claude/CLAUDE.md`. If none exists, create `AGENTS.md`. If both `AGENTS.md` and `CLAUDE.md` exist and neither imports the other, update both.
+2. Copy `${CLAUDE_PLUGIN_ROOT}/skills/block-docs/references/templates/agent-pointer.md` and replace `<docs-root>` with the docs root relative to `source-root`, for example `docs`.
+3. If the file already has a `<!-- block-docs:start -->` ... `<!-- block-docs:end -->` section, replace only that section. Never edit text outside the markers.
+4. Show the user the inserted section. The linter warns with `W008` while no file carries it.
+
 ## Workflow: bootstrap
 
 1. Establish `docs-root`, `source-root`, mode, and one source pin. Run `git status --short` in `source-root` to expose uncommitted changes.
@@ -83,7 +92,8 @@ Read `references/conventions.md` for the full rules and their reasons.
 3. Fill the root templates, then the complete template set for every block.
 4. Tag every claim and verify each citation at the source pin.
 5. Run the verify loop above for every block.
-6. Run the linter against the full `docs-root`. When a linter check is new, add its test and kill that check with one mutation in a disposable copy.
+6. Install the agent pointer (see "Point agents at the tree").
+7. Run the linter against the full `docs-root`. When a linter check is new, add its test and kill that check with one mutation in a disposable copy.
 
 ```sh
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/blockdocs_lint.py" <docs-root> --repo <source-root> [--strict] [--no-git | --drift <ref>] [--exempt path]
@@ -96,7 +106,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/blockdocs_lint.py" <docs-root> --repo <so
 3. Do not rewrite other pins without verification.
 4. If the new block needs newer code, ask the coordinator for a full refresh or keep a proposal outside the active tree.
 5. Run the verify loop above for the new or changed block.
-6. Finish with the full-root lint command above and run the relevant test for any new linter check.
+6. Check the agent pointer still exists and names the right docs root.
+7. Finish with the full-root lint command above and run the relevant test for any new linter check.
 
 ## Workflow: refresh and re-pin
 
@@ -105,7 +116,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/blockdocs_lint.py" <docs-root> --repo <so
 3. A completed refresh covers every active page. If the campaign stops early, keep the candidate pages outside the active tree and report the unfinished scope. Do not leave mixed pins as a completed refresh.
 4. Do not re-pin the whole tree because one block needs newer source.
 5. Run the verify loop above for every refreshed block at the new pin.
-6. Finish with the full-root lint command above and mutate each new linter check once.
+6. Check the agent pointer still exists and names the right docs root.
+7. Finish with the full-root lint command above and mutate each new linter check once.
 
 ## Workflow: audit coverage
 
@@ -124,4 +136,4 @@ A semantic audit also checks whether claims are true:
 
 For many blocks, read `references/orchestration.md` before assigning writers and verifiers. A writer gets a small, verifiable scope. The coordinator selects the campaign and resolves ownership conflicts.
 
-The linter checks structure, not the truth of claims. Verifier verdicts are the claim gate. The linter skips carried-forward material in `reference`, `superpowers`, `comparisons`, `plans`, and `specs` by default. Use `--exempt <path>` only for intentionally carried-forward material, with a path relative to `docs-root`. It exits `0` when clean, `1` for errors or strict warnings, and `2` for usage errors. `references/conventions.md` defines `E001` through `E008`, `W001` through `W007`, and `E999`. `W006` and `W007` run only with `--drift <ref>`, which cannot be combined with `--no-git`.
+The linter checks structure, not the truth of claims. Verifier verdicts are the claim gate. The linter skips carried-forward material in `reference`, `superpowers`, `comparisons`, `plans`, and `specs` by default. Use `--exempt <path>` only for intentionally carried-forward material, with a path relative to `docs-root`. It exits `0` when clean, `1` for errors or strict warnings, and `2` for usage errors. `references/conventions.md` defines `E001` through `E008`, `W001` through `W008`, and `E999`. `W006` and `W007` run only with `--drift <ref>`, which cannot be combined with `--no-git`. `W008` means no `AGENTS.md`, `CLAUDE.md`, or `.claude/CLAUDE.md` at `--repo` carries a valid pointer block.
