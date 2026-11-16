@@ -64,11 +64,11 @@ pinned version, run `bun install` in `dsh/` and commit the updated lockfile. To
 inspect the adapter after installation, run:
 
 ```sh
-bun x claude-plugin-dsh@0.2.0 inspect .
+bun x claude-plugin-dsh@0.2.1 inspect .
 ```
 
-Do not use the runtime's sync or scaffold commands on this adapter; version 0.2.0
-creates a vendored runtime copy. Those commands are not part of this workflow.
+Do not use the runtime's sync or scaffold commands on this adapter; as of 0.2.1, they
+create a vendored runtime copy. Those commands are not part of this workflow.
 
 The plugin ships no hooks, MCP servers, credentials, or permission overrides. The
 writer and verifier inherit the session's model unless the coordinator picks another. Structural linting requires Python 3.9 or
