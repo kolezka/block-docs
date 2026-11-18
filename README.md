@@ -121,6 +121,17 @@ partial sections get one fix round; what is still unresolved becomes a gap or go
 to the user. This costs one agent run per block. Use a different model for the
 verifier than for the writer when one is available.
 
+Documentation helps only if agents working in the repository read it. At the end of
+every writing campaign the skill adds a managed section to the repository's
+`AGENTS.md` or `CLAUDE.md` (it creates `AGENTS.md` if neither exists), between
+`<!-- block-docs:start -->` and `<!-- block-docs:end -->`. The section tells an agent
+to find the block that owns a file before editing it, to keep its contracts and
+invariants, to treat `GAPS.md` as unenforced, and to trust code over a page pinned
+to an older commit. It needs no plugin at read time, so Claude Code, Codex, DSH or
+any other harness that loads those files picks it up. The template is
+[`agent-pointer.md`](skills/block-docs/references/templates/agent-pointer.md), and
+the linter warns with `W008` while the section is missing.
+
 A partial edit does not justify updating every page's verification stamp. Additions
 must fit the existing source pin or be treated as a separate proposal until the
 full documentation campaign is refreshed.
@@ -238,6 +249,7 @@ scope.
 | W005 | Warning | A `[verified]` paragraph or list item on a non-README block page has no recognized citation, unless its leaf section has a `scope:` line naming a command or path set |
 | W006 | Warning | With `--drift REF`: a cited source file changed between the page pin and REF |
 | W007 | Warning | With `--drift REF`: a commit in pin..REF whose subject starts with `revert` (any case, merge reverts included) touches the block's owned paths |
+| W008 | Warning | No `AGENTS.md`, `CLAUDE.md` or `.claude/CLAUDE.md` at `--repo` has a valid `block-docs` pointer section linking the docs root, or a marked section is broken |
 | E999 | Error | No non-exempt documentation was scanned |
 
 Exit status is `0` for no blocking findings, `1` for findings, and `2` for invalid

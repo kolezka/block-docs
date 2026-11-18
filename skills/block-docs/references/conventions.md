@@ -122,6 +122,10 @@ Every block contains `README.md`, `CONTRACTS.md`, `INVARIANTS.md`, `GAPS.md`, an
 
 Describe a resolver and its precedence, never only the result observed on one machine. When a system computes a value, cite its generator and the command that reproduces it instead of hand-copying a number.
 
+## Agent pointer
+
+Agents read the tree only when an instruction file they already load tells them to. The source repository's `AGENTS.md` or `CLAUDE.md` carries a managed section copied from `templates/agent-pointer.md`, between `<!-- block-docs:start -->` and `<!-- block-docs:end -->`. It tells an agent to find the owning block through `owns:`, to respect contracts and invariants, to treat `GAPS.md` and `enforcement: convention` as unenforced, and to trust code over a page whose pin is older than the file. Tools rewrite only the text between the markers. The section works without this plugin installed, so any agent harness that reads those files picks it up.
+
 ## Style
 
 Write plain, short, concrete prose. Do not copy private systems, domains, organizations, people, data, or historic numeric measurements into a reusable plugin. Do not use en dash or em dash. Use a comma, colon, full stop, or parentheses instead.
@@ -155,6 +159,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/blockdocs_lint.py" <docs-root> --repo <so
 | `W005` | A code-mode paragraph or list item with a `[verified]` tag, on a block page other than `README.md`, has no recognized citation in its prose or tag detail. A leaf section with a meaningful `scope:` line (same rule as `W004`) is exempt. |
 | `W006` | With `--drift <ref>` only: a cited source file changed between the page pin and `<ref>`. |
 | `W007` | With `--drift <ref>` only: a commit in `<pin>..<ref>` whose subject starts with `revert` in any case, including a merge revert, touches the block's `owns:` paths. |
+| `W008` | No `AGENTS.md`, `CLAUDE.md`, or `.claude/CLAUDE.md` at `--repo` has a `<!-- block-docs:start -->` ... `<!-- block-docs:end -->` section linking `` `<docs-root>/README.md` ``, or a file has broken markers or a pointer to another docs root. Files without the markers are ignored. |
 | `E999` | No page was scanned. |
 
 Errors exit with status `1`. Warnings exit with status `1` only under `--strict`. Usage errors exit with status `2`. The linter does not prove that a claim is true, complete, or semantically assigned to the right owner. `W004` and `W005` catch the shape of a risky claim, not its truth: a `scope:` line can be too narrow and a citation can point at the wrong code. A lint-clean tree still needs verifier verdicts.

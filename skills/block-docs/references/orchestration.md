@@ -78,6 +78,7 @@ Run the verifier on a different model than the writer when one is available. A s
 7. A section still unresolved after that round is rewritten as a gap in `GAPS.md` or reported to the user. Do not start a second fix loop. Suspected code bugs go to the user, not to a writer.
 8. After every block has passed verification, the coordinator integrates the pages, resolves ownership collisions, and runs the full-tree linter as the completion gate. A writer's intermediate run is not that final gate.
 9. Stage the tree before a gate enumerates tracked files. A gate cannot assess an incomplete tree.
+10. The coordinator, not a writer, installs or updates the agent pointer section in the source repository's `AGENTS.md` or `CLAUDE.md` (see "Agent pointer" in `conventions.md`). Writers never edit those files.
 
 A parent with subblocks has its own five pages. Its `README.md` may provide navigation, but it does not replace the parent's contracts, gaps, or operations.
 

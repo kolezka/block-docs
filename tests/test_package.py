@@ -26,6 +26,7 @@ def test_marketplace_resolves_to_the_complete_advertised_plugin():
         "skills/block-docs/references/conventions.md",
         "skills/block-docs/references/orchestration.md",
         "scripts/blockdocs_lint.py",
+        "skills/block-docs/references/templates/agent-pointer.md",
     ]
     for family, pages in (
         ("root", ("README", "CONVENTIONS", "GLOSSARY", "DATA-FLOW", "OWNERSHIP")),

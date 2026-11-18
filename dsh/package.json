@@ -1,6 +1,6 @@
 {
   "name": "@kolezka/block-docs-dsh",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "DeepSeek Harness adapter for the block-docs Claude Code plugin",
   "type": "module",
